@@ -2,7 +2,6 @@ import numpy as np
 from typing import List
 from .base import Module
 
-
 class Linear(Module):
     """
     Applies linear (affine) transformation of data: y = x W^T + b
@@ -27,8 +26,7 @@ class Linear(Module):
         :param input: array of shape (batch_size, in_features)
         :return: array of shape (batch_size, out_features)
         """
-        # replace with your code ｀、ヽ｀、ヽ(ノ＞＜)ノ ヽ｀☂｀、ヽ
-        return super().compute_output(input)
+        return np.dot(input, self.weight.T) + self.bias if self.bias is not None else np.dot(input, self.weight.T)
 
     def compute_grad_input(self, input: np.ndarray, grad_output: np.ndarray) -> np.ndarray:
         """
@@ -36,16 +34,18 @@ class Linear(Module):
         :param grad_output: array of shape (batch_size, out_features)
         :return: array of shape (batch_size, in_features)
         """
-        # replace with your code ｀、ヽ｀、ヽ(ノ＞＜)ノ ヽ｀☂｀、ヽ
-        return super().compute_grad_input(input, grad_output)
+        return np.dot(grad_output, self.weight)
 
     def update_grad_parameters(self, input: np.ndarray, grad_output: np.ndarray):
         """
-        :param input: array of shape (batch_size, in_features)
-        :param grad_output: array of shape (batch_size, out_features)
+        :param input: массив формы (batch_size, in_features)
+        :param grad_output: массив формы (batch_size, out_features)
         """
-        # replace with your code ｀、ヽ｀、ヽ(ノ＞＜)ノ ヽ｀☂｀、ヽ
-        super().update_grad_parameters(input, grad_output)
+        self.grad_weight += np.dot(grad_output.T, input)
+        if self.bias is not None:
+            self.grad_bias += np.sum(grad_output, axis=0)
+
+
 
     def zero_grad(self):
         self.grad_weight.fill(0)
@@ -105,11 +105,32 @@ class BatchNormalization(Module):
 
     def compute_output(self, input: np.ndarray) -> np.ndarray:
         """
-        :param input: array of shape (batch_size, num_features)
-        :return: array of shape (batch_size, num_features)
+        :param input: массив формы (batch_size, num_features)
+        :return: массив формы (batch_size, num_features)
         """
-        # replace with your code ｀、ヽ｀、ヽ(ノ＞＜)ノ ヽ｀☂｀、ヽ
-        return super().compute_output(input)
+
+        if self.training:
+            self.mean = np.mean(input, axis=0)
+            self.input_mean = input - self.mean
+            self.var = np.mean(self.input_mean ** 2, axis=0)
+            self.sqrt_var = np.sqrt(self.var + self.eps)
+            self.inv_sqrt_var = 1 / self.sqrt_var
+            self.norm_input = self.input_mean * self.inv_sqrt_var
+
+            y = self.norm_input
+            if self.affine:
+                y = self.norm_input * self.weight + self.bias
+
+            self.running_mean = (1 - self.momentum) * self.running_mean + self.momentum * self.mean
+            self.running_var = (1 - self.momentum) * self.running_var + self.momentum * self.var
+        else:
+            normalized_input = (input - self.running_mean) / np.sqrt(self.running_var + self.eps)
+            y = normalized_input
+            if self.affine:
+                y = normalized_input * self.weight + self.bias
+
+        return y
+
 
     def compute_grad_input(self, input: np.ndarray, grad_output: np.ndarray) -> np.ndarray:
         """
@@ -117,16 +138,17 @@ class BatchNormalization(Module):
         :param grad_output: array of shape (batch_size, num_features)
         :return: array of shape (batch_size, num_features)
         """
-        # replace with your code ｀、ヽ｀、ヽ(ノ＞＜)ノ ヽ｀☂｀、ヽ
-        return super().compute_grad_input(input, grad_output)
+        return grad_output * self.weight * self.inv_sqrt_var
 
     def update_grad_parameters(self, input: np.ndarray, grad_output: np.ndarray):
         """
         :param input: array of shape (batch_size, num_features)
         :param grad_output: array of shape (batch_size, num_features)
         """
-        # replace with your code ｀、ヽ｀、ヽ(ノ＞＜)ノ ヽ｀☂｀、ヽ
-        super().update_grad_parameters(input, grad_output)
+        if self.affine:
+            self.grad_weight += np.sum(grad_output * self.norm_input, axis=0)
+            self.grad_bias += np.sum(grad_output, axis=0)
+
 
     def zero_grad(self):
         if self.affine:
@@ -155,21 +177,14 @@ class Dropout(Module):
         self.mask = None
 
     def compute_output(self, input: np.ndarray) -> np.ndarray:
-        """
-        :param input: array of an arbitrary size
-        :return: array of the same size
-        """
-        # replace with your code ｀、ヽ｀、ヽ(ノ＞＜)ノ ヽ｀☂｀、ヽ
-        return super().compute_output(input)
+        if self.training:
+            self.mask = (np.random.rand(*input.shape) > self.p) / (1 - self.p)
+            return input * self.mask
+        else:
+            return input
 
     def compute_grad_input(self, input: np.ndarray, grad_output: np.ndarray) -> np.ndarray:
-        """
-        :param input: array of an arbitrary size
-        :param grad_output: array of the same size
-        :return: array of the same size
-        """
-        # replace with your code ｀、ヽ｀、ヽ(ノ＞＜)ノ ヽ｀☂｀、ヽ
-        return super().compute_grad_input(input, grad_output)
+        return grad_output * self.mask if self.training else grad_output
 
     def __repr__(self) -> str:
         return f'Dropout(p={self.p})'
@@ -188,17 +203,23 @@ class Sequential(Module):
         :param input: array of size matching the input size of the first layer
         :return: array of size matching the output size of the last layer
         """
-        # replace with your code ｀、ヽ｀、ヽ(ノ＞＜)ノ ヽ｀☂｀、ヽ
-        return super().compute_output(input)
+        result = input
+        for module in self.modules:
+            result = module.forward(result)
+
+        return result
 
     def compute_grad_input(self, input: np.ndarray, grad_output: np.ndarray) -> np.ndarray:
-        """
-        :param input: array of size matching the input size of the first layer
-        :param grad_output: array of size matching the output size of the last layer
-        :return: array of size matching the input size of the first layer
-        """
-        # replace with your code ｀、ヽ｀、ヽ(ノ＞＜)ノ ヽ｀☂｀、ヽ
-        return super().compute_grad_input(input, grad_output)
+        result = grad_output
+        for i in range(len(self.modules)-1, -1, -1):
+            module = self.modules[i]
+            if i == len(self.modules) - 1:
+                result = module.compute_grad_input(self.modules[-2].output, grad_output)
+            else:
+                result = module.compute_grad_input(self.modules[i+1].output, result)
+        return result
+
+
 
     def __getitem__(self, item):
         return self.modules[item]
